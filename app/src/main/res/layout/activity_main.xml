@@ -8,21 +8,34 @@
     tools:context=".MainActivity">
 
     <LinearLayout
-        android:id="@+id/linearLayout"
+        android:id="@+id/linearLayout1"
         android:layout_width="410dp"
-        android:layout_height="502dp"
+        android:layout_height="800dp"
         android:layout_alignParentTop="true"
         android:background="#FCFCFD"
         android:orientation="vertical"
-        tools:ignore="MissingConstraints"
-        tools:layout_editor_absoluteY="248dp"></LinearLayout>
+        tools:layout_editor_absoluteY="0dp"
+        tools:ignore="MissingConstraints">
 
-    <com.jjoe64.graphview.GraphView
-        android:id="@+id/graph"
-        android:layout_width="410dp"
-        android:layout_height="502dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        tools:ignore="MissingConstraints" />
+        <com.jjoe64.graphview.GraphView
+            android:id="@+id/gyrograph"
+            android:layout_width="411dp"
+            android:layout_height="300dp"
+            tools:ignore="MissingConstraints" />
+
+        <com.jjoe64.graphview.GraphView
+            android:id="@+id/accgraph"
+            android:layout_width="410dp"
+            android:layout_height="440dp"
+            tools:ignore="MissingConstraints" />
+
+        <Button
+            android:id="@+id/button1"
+            android:layout_width="410dp"
+            android:layout_height="56dp"
+            android:text="Try again"
+            tools:ignore="MissingConstraints" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/textView1"
@@ -49,7 +62,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="268dp"
-        android:layout_marginTop="92dp"
+        android:layout_marginTop="250dp"
         android:text="Peak"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />

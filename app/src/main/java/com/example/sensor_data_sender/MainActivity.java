@@ -20,7 +20,9 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
+import android.view.View;
 import android.widget.TextView;
+import android.widget.Button;
 
 import com.github.mikephil.charting.data.LineData;
 import com.jjoe64.graphview.GraphView;
@@ -44,13 +46,15 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     //graph
     private LineGraphSeries<DataPoint> mSeriesAccelX,mSeriesAccelY,mSeriesAccelZ;
+    private LineGraphSeries<DataPoint> mSeriesGyroX,mSeriesGyroY,mSeriesGyroZ;
     //400Hz로 가속도 센서 데이터가 수집된다면, 1초에 400개의 데이터가 수집됩니다. 이를 80밀리초로 환산하면:
     //1초에 400개의 데이터가 수집되므로,80밀리초에는 (400 * 80) / 1000 = 32개의 데이터가 수집됩니다.
     //따라서, 80밀리초 동안 수집되는 데이터 수는 32개입니다.
     private final int max_dp=32;  // 400Hz 일 때, 80ms에 해당하는 샘플링 크기
 
-    private GraphView mGraphAccel;
+    private GraphView mGraphAccel, mGraphGyro;
     private double graphLastAccelXValue = 10d;
+    private double graphLastGyroZValue = 10d;
     private GraphView line_graph;
 
     private boolean peak_detected = false;
@@ -66,6 +70,17 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         acctext = (TextView) findViewById(R.id.textView1);
         gyrotext = (TextView) findViewById(R.id.textView2);
         ispeaktext = (TextView) findViewById(R.id.textView3);
+        Button button1 = (Button) findViewById(R.id.button1) ;
+        button1.setOnClickListener(new Button.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                graphLastAccelXValue = 10d;
+                graphLastGyroZValue = 10d;
+                mSeriesAccelX.resetData(new DataPoint[] {});
+                mSeriesGyroZ.resetData(new DataPoint[] {});
+                peak_detected = false;
+            }
+        });
         acclistener = new SensorEventListener() {
             @Override
             public void onSensorChanged(SensorEvent sensorEvent) {
@@ -109,9 +124,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         gyrolistener = new SensorEventListener() {
             @Override
             public void onSensorChanged(SensorEvent sensorEvent) {
-                if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
+                if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE  && !peak_detected) {
                     gyrotext.setText("Gyroscope value. \n" + "\n x : " + sensorEvent.values[0] +
                             "\n y : " + sensorEvent.values[1] + "\n z : " + sensorEvent.values[2]);
+
+                    graphLastGyroZValue += 0.05d;
+
+                    mSeriesGyroZ.appendData(new DataPoint(graphLastGyroZValue,sensorEvent.values[2]),true,max_dp);
                 }
             }
 
@@ -121,11 +140,14 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             }
         };
 
-        mSeriesAccelX = initSeries(Color.BLUE, "X"); //라인 그래프를 그림
-        mGraphAccel = initGraph(R.id.graph, "X direction Acceleration");
+        mSeriesAccelX = initSeries(Color.BLUE, "acc_X"); //라인 그래프를 그림
+        mSeriesGyroZ = initSeries(Color.RED, "gyro_Z");
+        mGraphAccel = initGraph(R.id.accgraph, "X direction Acceleration", -100, 100, LegendRenderer.LegendAlign.TOP);
+        mGraphGyro = initGraph(R.id.gyrograph, "Z direction Gyroscope", -20, 20, LegendRenderer.LegendAlign.TOP);
 
         //그래프에 x,y,z 추가
         mGraphAccel.addSeries(mSeriesAccelX);
+        mGraphGyro.addSeries(mSeriesGyroZ);
     }
 
     protected void onResume() {
@@ -172,9 +194,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 ispeaktext.setText("-");
             }
         }
-        if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE) {
+        if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE  && !peak_detected) {
             gyrotext.setText("Gyroscope value. \n" + "\n x : " + sensorEvent.values[0] +
                     "\n y : " + sensorEvent.values[1] + "\n z : " + sensorEvent.values[2]);
+
+            graphLastGyroZValue += 0.05d;
+
+            mSeriesGyroZ.appendData(new DataPoint(graphLastGyroZValue,sensorEvent.values[2]),true,max_dp);
         }
     }
 
@@ -185,20 +211,20 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
 
     //그래프 초기화
-    public GraphView initGraph(int id, String title) {
+    public GraphView initGraph(int id, String title, int minY, int maxY, LegendRenderer.LegendAlign align) {
         GraphView graph = findViewById(id);
         //데이터가 늘어날때 x축 scroll이 생기도록
         graph.getViewport().setXAxisBoundsManual(true);
         graph.getViewport().setMinX(0);
         graph.getViewport().setMaxX(1.5);
         graph.getViewport().setYAxisBoundsManual(true);
-        graph.getViewport().setMinY(-100);
-        graph.getViewport().setMaxY(100);
+        graph.getViewport().setMinY(minY);
+        graph.getViewport().setMaxY(maxY);
         graph.getGridLabelRenderer().setLabelVerticalWidth(100);
         graph.setTitle(title);
         graph.getGridLabelRenderer().setHorizontalLabelsVisible(false);
         graph.getLegendRenderer().setVisible(true);
-        graph.getLegendRenderer().setAlign(LegendRenderer.LegendAlign.TOP);
+        graph.getLegendRenderer().setAlign(align);
         return graph;
     }
 
