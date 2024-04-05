@@ -157,7 +157,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                             Log.d("fft", "ratio:" + freq_ratio);
 
                             if (freq_ratio > freq_ratio_threshold) { // 주파수 비율이 임계치를 넘는다면
-                                ispeaktext.setText("peak! freq_ratio : " + freq_ratio);
+                                ispeaktext.setText("[knock detected] ratio:" + freq_ratio);
                                 peak_detected = true; // 노크를 감지
                             }
                         }
@@ -249,7 +249,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     ispeaktext.setText("ratio:" + freq_ratio);
                     Log.d("fft", "ratio:" + freq_ratio);
                     if (freq_ratio > freq_ratio_threshold) {
-                        ispeaktext.setText("peak! freq_ratio : " + freq_ratio);
+                        ispeaktext.setText("[knock detected] ratio:" + freq_ratio);
                         //max_ratio = freq_ratio;
                         peak_detected = true;
                     }

@@ -61,9 +61,11 @@
         android:id="@+id/textView3"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="268dp"
-        android:layout_marginTop="250dp"
-        android:text="Peak"
+        android:layout_marginStart="80dp"
+        android:layout_marginTop="324dp"
+        android:text="-"
+        android:textStyle="bold"
+        android:textColor="#ff2c2c"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
