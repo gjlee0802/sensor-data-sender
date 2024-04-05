@@ -3,33 +3,31 @@ package com.example.sensor_data_sender;
 import android.graphics.Color;
 import android.os.Bundle;
 
-import androidx.activity.EdgeToEdge;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 
+import java.util.Arrays;
 import java.util.Iterator;
-import java.util.List;
-import java.util.ArrayList;
-//import java.util.LinkedList; //import
-//import java.util.Queue; //import
+import java.util.LinkedList;
+import java.util.Queue;
+
 
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
+import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 import android.widget.Button;
 
-import com.github.mikephil.charting.data.LineData;
 import com.jjoe64.graphview.GraphView;
-import com.jjoe64.graphview.Viewport;
 import com.jjoe64.graphview.series.DataPoint;
 import com.jjoe64.graphview.series.LineGraphSeries;
 import com.jjoe64.graphview.LegendRenderer;
+
+import org.jtransforms.fft.DoubleFFT_1D;
+
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
 
@@ -46,18 +44,66 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     //graph
     private LineGraphSeries<DataPoint> mSeriesAccelX,mSeriesAccelY,mSeriesAccelZ;
+    Queue<Float> knock_sample = new SizeLimitedQueue<>(32);
     private LineGraphSeries<DataPoint> mSeriesGyroX,mSeriesGyroY,mSeriesGyroZ;
+
     //400Hz로 가속도 센서 데이터가 수집된다면, 1초에 400개의 데이터가 수집됩니다. 이를 80밀리초로 환산하면:
     //1초에 400개의 데이터가 수집되므로,80밀리초에는 (400 * 80) / 1000 = 32개의 데이터가 수집됩니다.
     //따라서, 80밀리초 동안 수집되는 데이터 수는 32개입니다.
     private final int max_dp=32;  // 400Hz 일 때, 80ms에 해당하는 샘플링 크기
+    private int waitcount = 0; // 초기 데이터 수집을 기다리게 하는 카운트
+    private int knocksample_cnt = 0; //피크 감지 후 축적한 노크 데이터 샘플 개수를 카운트
 
     private GraphView mGraphAccel, mGraphGyro;
     private double graphLastAccelXValue = 10d;
     private double graphLastGyroZValue = 10d;
-    private GraphView line_graph;
 
     private boolean peak_detected = false;
+
+    //*****************사용자 설정값****************/
+    // frequency domain에서 인덱스를 기준으로 주파수 성분 sum값 간의 비율을 결정할 경계선이 되는 인덱스를 설정함.
+    // (size - freq_threshold_index)가 경계가 됨.
+    private static int freq_threshold_index = 43;
+    // 주파수 비율이 아래 임계 수치를 초과하면 노크 감지.
+    // 위의 주파수 비율을 결정하는 경계선 값에 따라 아래의 임계 수치를 조정해야 함.
+    private static float freq_ratio_threshold = 1.7f;
+
+    public static class SizeLimitedQueue<E>
+            extends LinkedList<E> {
+
+        // Variable which store the
+        // SizeLimitOfQueue of the queue
+        private int SizeLimitOfQueue;
+
+        // Constructor method for initializing
+        // the SizeLimitOfQueue variable
+        public SizeLimitedQueue(int SizeLimitOfQueue)
+        {
+            this.SizeLimitOfQueue = SizeLimitOfQueue;
+        }
+
+        // Override the method add() available
+        // in LinkedList class so that it allow
+        // addition  of element in queue till
+        // queue size is less than
+        // SizeLimitOfQueue otherwise it remove
+        // the front element of queue and add
+        // new element
+        @Override
+        public boolean add(E o)
+        {
+
+            // If queue size become greater
+            // than SizeLimitOfQueue then
+            // front of queue will be removed
+            while (this.size() == SizeLimitOfQueue) {
+
+                super.remove();
+            }
+            super.add(o);
+            return true;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -79,6 +125,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 mSeriesAccelX.resetData(new DataPoint[] {});
                 mSeriesGyroZ.resetData(new DataPoint[] {});
                 peak_detected = false;
+                knocksample_cnt = 0;
             }
         });
         acclistener = new SensorEventListener() {
@@ -90,29 +137,40 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
                     graphLastAccelXValue += 0.05d;
                     mSeriesAccelX.appendData(new DataPoint(graphLastAccelXValue,sensorEvent.values[0]),true,max_dp);
+                    knock_sample.add((float) sensorEvent.values[0]);
 
-                    double sum_freq_g15 = 0d;
-                    double sum_freq_l15 = 0d;
-
-                    Iterator<DataPoint> dataiter = mSeriesAccelX.getValues(0, max_dp);
-                    while (dataiter.hasNext()){
-                        DataPoint dp = dataiter.next();
-                        if (dp.getY() > 15){
-                            sum_freq_g15 = sum_freq_g15 + dp.getY();
+                    //1000개 이상의 datapoint가 모이길 기다림
+                    if (waitcount > 1000){
+                        Iterator<DataPoint> dataiter = mSeriesAccelX.getValues(0, mSeriesAccelX.getHighestValueX());
+                        double[] data = new double[256]; // 32개 샘플 뒤에 zero-padding을 적용하여 256 길이로 만듦
+                        Arrays.fill(data, 0d);
+                        int i = 0;
+                        while (dataiter.hasNext()){
+                            DataPoint dp = dataiter.next();
+                            data[i] = dp.getY();
+                            i++;
                         }
-                        if (dp.getY() < 15){
-                            sum_freq_l15 = sum_freq_l15 + dp.getY();
-                        }
-                    }
 
-                    if (sum_freq_g15/sum_freq_l15 > 2d) {
-                        ispeaktext.setText("is Peak !!");
-                        peak_detected = true;
+                        if (i >= 32) { // 32크기 이상의 샘플이 모였을 때
+                            float freq_ratio = calcFreqRatio(data, data.length); // 주파수 비율을 계산
+                            ispeaktext.setText("ratio:" + freq_ratio);
+                            Log.d("fft", "ratio:" + freq_ratio);
+
+                            if (freq_ratio > freq_ratio_threshold) { // 주파수 비율이 임계치를 넘는다면
+                                ispeaktext.setText("peak! freq_ratio : " + freq_ratio);
+                                peak_detected = true; // 노크를 감지
+                            }
+                        }
                     } else {
-                        ispeaktext.setText("-");
+                        waitcount += 1;
                     }
-
+                }else if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER && peak_detected && knocksample_cnt < 29) {
+                    graphLastAccelXValue += 0.05d;
+                    mSeriesAccelX.appendData(new DataPoint(graphLastAccelXValue,sensorEvent.values[0]),true,max_dp);
+                    knock_sample.add(sensorEvent.values[0]);
+                    knocksample_cnt++;
                 }
+
             }
 
             @Override
@@ -172,26 +230,32 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
             graphLastAccelXValue += 0.05d;
             mSeriesAccelX.appendData(new DataPoint(graphLastAccelXValue,sensorEvent.values[0]),true,max_dp);
+            knock_sample.add((float) sensorEvent.values[0]);
 
-            double sum_freq_g15 = 0d;
-            double sum_freq_l15 = 0d;
-
-            Iterator<DataPoint> dataiter = mSeriesAccelX.getValues(0, max_dp);
-            while (dataiter.hasNext()){
-                DataPoint dp = dataiter.next();
-                if (dp.getY() > 15){
-                    sum_freq_g15 = sum_freq_g15 + dp.getY();
+            if (waitcount >= 1000){
+                Iterator<DataPoint> dataiter = mSeriesAccelX.getValues(0, mSeriesAccelX.getHighestValueX());
+                double[] data = new double[256];
+                Arrays.fill(data, 0d);
+                int i = 0;
+                while (dataiter.hasNext()) {
+                    DataPoint dp = dataiter.next();
+                    data[i] = dp.getY();
+                    i++;
                 }
-                if (dp.getY() < 15){
-                    sum_freq_l15 = sum_freq_l15 + dp.getY();
-                }
-            }
 
-            if (sum_freq_g15/sum_freq_l15 > 2d) {
-                ispeaktext.setText("is Peak !!");
-                peak_detected = true;
+                if (i >= 32) {
+                    float freq_ratio = calcFreqRatio(data, data.length);
+
+                    ispeaktext.setText("ratio:" + freq_ratio);
+                    Log.d("fft", "ratio:" + freq_ratio);
+                    if (freq_ratio > freq_ratio_threshold) {
+                        ispeaktext.setText("peak! freq_ratio : " + freq_ratio);
+                        //max_ratio = freq_ratio;
+                        peak_detected = true;
+                    }
+                }
             } else {
-                ispeaktext.setText("-");
+                waitcount +=1;
             }
         }
         if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE  && !peak_detected) {
@@ -201,6 +265,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             graphLastGyroZValue += 0.05d;
 
             mSeriesGyroZ.appendData(new DataPoint(graphLastGyroZValue,sensorEvent.values[2]),true,max_dp);
+        }else if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER && peak_detected && knocksample_cnt < 29) {
+            graphLastAccelXValue += 0.05d;
+            mSeriesAccelX.appendData(new DataPoint(graphLastAccelXValue,sensorEvent.values[0]),true,max_dp);
+            knock_sample.add(sensorEvent.values[0]);
+            knocksample_cnt++;
         }
     }
 
@@ -237,5 +306,96 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         series.setColor(color);
         series.setTitle(title);
         return series;
+    }
+
+
+
+
+    // 주파수 계산 함수 정의
+    public float calcFreqRatio(double[] data, int series_size) {
+
+
+        //FFT Transform
+        double[] fftData = performFFT(data);
+        double[] mag = new double[fftData.length/2];
+
+        //String magstr = "[";
+        for(int k=0;k<fftData.length/2;k++) {
+            mag[k] = Math.sqrt(Math.pow(fftData[2 * k], 2) + Math.pow(fftData[2 * k + 1], 2));
+            //if (mag.length/2 <= k && k < mag.length) {
+            //    magstr = magstr + mag[k]+", ";
+            //}
+        }
+        //magstr = magstr + "]";
+        //Log.d("test", "mag:"+magstr);
+
+        double[] mag_slice = Arrays.copyOfRange(mag, 0, mag.length/2+1);
+
+        return (float) (sumHighFrequencies(mag_slice) / sumLowFrequencies(mag_slice));
+    }
+
+    // FFT 변환 수행
+    private double[] performFFT(double[] data) {
+        DoubleFFT_1D fft = new DoubleFFT_1D(data.length);
+
+        //-> JTransform 부분
+        //Jtransform 은 입력에 실수부 허수부가 들어가야하므로 허수부 임의로 0으로 채워서 생성해줌
+        double y[] = new double[data.length];
+        for (int i = 0; i < data.length; i++) {
+            y[i] = 0;
+        }
+        //실수 허수를 넣으므로 연산에는 blockSize의 2배인 배열 필요
+        double[] summary = new double[2 * data.length];
+
+        // 입력 데이터 복사
+        //Arrays.fill(summary, 0d);
+        //System.arraycopy(data, 0, summary, 0, data.length);
+
+        for (int k = 0; k < data.length; k++) {
+            summary[2 * k] = data[k]; //실수부
+            summary[2 * k + 1] = y[k]; //허수부 0으로 채워넣음.
+        }
+
+        fft.realForward(summary);
+
+        return summary;
+    }
+
+    // 주파수 대역에서 특정 주파수 이상의 성분을 합산
+    //private double sumHighFrequencies(double[] fftData) {
+    private double sumHighFrequencies(double[] mag_slice) {
+        double sum = 0;
+        double sampleRate = 400; // 샘플링 주파수
+
+        //400Hz -> 32
+        for(int k=0; k<mag_slice.length; k++){
+            if (mag_slice.length-freq_threshold_index >= k) { // len-10 <= k 영역 저주파 신호가 많음
+                sum += mag_slice[k];
+            }
+        }
+
+        //Log.d("test", "hfreq sum: " + sum);
+
+        return sum;
+    }
+
+    private static double sumLowFrequencies(double[] mag_slice) {
+        double sum = 0;
+        double sampleRate = 400; // 샘플링 주파수
+
+        // 주파수 대역 계산
+        //double frequencyResolution = sampleRate / fftData.length;
+        //int endIndex = (int) Math.floor(15 / frequencyResolution);
+
+        for(int k=0; k<mag_slice.length; k++) {
+            //sum += Math.sqrt(Math.pow(fftData[2 * k], 2) + Math.pow(fftData[2 * k + 1], 2));
+            if ( k > mag_slice.length-freq_threshold_index) {
+                sum += mag_slice[k];
+            }
+        }
+
+        //Log.d("test", "lfreq sum: " + sum);
+
+        return sum;
     }
 }
