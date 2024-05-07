@@ -10,6 +10,7 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -31,6 +32,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
 import android.os.Environment;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
@@ -141,6 +143,20 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         }
     }
 
+    // 4096 (raw data points) / 48000 (Hz sampling rate) = 0.0853 (s) = 85 (ms)
+    private static final int STOP_RECORDING_DELAY_MS = 85;
+
+    private Handler stopRecordingHandler;
+
+    private Runnable stopRecordingRunnable = new Runnable() {
+        @Override
+        public void run() {
+            stopRecording();
+            Log.d("audio", "Called stopRecording");
+        }
+    };
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -153,6 +169,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         gyrotext = (TextView) findViewById(R.id.textView2);
         ispeaktext = (TextView) findViewById(R.id.textView3);
         Button button1 = (Button) findViewById(R.id.button1);
+        stopRecordingHandler =  new Handler(Looper.getMainLooper());
 
         if (Build.VERSION.SDK_INT >= 30){
             if (!Environment.isExternalStorageManager()){
@@ -161,6 +178,31 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 startActivity(getpermission);
             }
         }
+
+        checkingStoragePermission();
+
+        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            //When permission is not granted by user, show them message why this permission is needed.
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this,
+                    android.Manifest.permission.RECORD_AUDIO)) {
+                Toast.makeText(this, "Please grant permissions to record audio", Toast.LENGTH_LONG).show();
+
+                //Give user option to still opt-in the permissions
+                ActivityCompat.requestPermissions(this,
+                        new String[]{android.Manifest.permission.RECORD_AUDIO},
+                        321);
+
+            } else {
+                // Show user dialog to grant permission to record audio
+                ActivityCompat.requestPermissions(this,
+                        new String[]{android.Manifest.permission.RECORD_AUDIO},
+                        321);
+            }
+            return;
+        }
+
+        recorder = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, SAMPLING_RATE_IN_HZ,
+                CHANNEL_CONFIG, AUDIO_FORMAT, BUFFER_SIZE);
 
         button1.setOnClickListener(new Button.OnClickListener() {
             @Override
@@ -213,8 +255,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     mSeriesAccelX.appendData(new DataPoint(graphLastAccelXValue, sensorEvent.values[0]), true, max_dp);
                     acc_x_knock_sample.add(sensorEvent.values[0]);
                     acc_knocksample_cnt++;
-                } else if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER && peak_detected && acc_knocksample_cnt >=29) { // All collected
-                    stopRecording();
                 }
 
             }
@@ -241,8 +281,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     mSeriesGyroZ.appendData(new DataPoint(graphLastGyroZValue, sensorEvent.values[0]), true, max_dp);
                     gyro_z_knock_sample.add(sensorEvent.values[0]);
                     gyro_knocksample_cnt++;
-                } else if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE && peak_detected && gyro_knocksample_cnt >=29) { // All collected
-                    stopRecording();
                 }
             }
 
@@ -310,8 +348,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             mSeriesAccelX.appendData(new DataPoint(graphLastAccelXValue, sensorEvent.values[0]), true, max_dp);
             acc_x_knock_sample.add(sensorEvent.values[0]);
             acc_knocksample_cnt++;
-        } else if (sensorEvent.sensor.getType() == Sensor.TYPE_ACCELEROMETER && peak_detected && acc_knocksample_cnt >=29) { // All collected
-            stopRecording();
         }
 
 
@@ -327,8 +363,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             mSeriesGyroZ.appendData(new DataPoint(graphLastGyroZValue, sensorEvent.values[0]), true, max_dp);
             gyro_z_knock_sample.add(sensorEvent.values[0]);
             gyro_knocksample_cnt++;
-        } else if (sensorEvent.sensor.getType() == Sensor.TYPE_GYROSCOPE && peak_detected && gyro_knocksample_cnt >=29) { // All collected
-            stopRecording();
         }
     }
 
@@ -451,33 +485,12 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private void startRecording() {
-        if (ActivityCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            //When permission is not granted by user, show them message why this permission is needed.
-            if (ActivityCompat.shouldShowRequestPermissionRationale(this,
-                    android.Manifest.permission.RECORD_AUDIO)) {
-                Toast.makeText(this, "Please grant permissions to record audio", Toast.LENGTH_LONG).show();
-
-                //Give user option to still opt-in the permissions
-                ActivityCompat.requestPermissions(this,
-                        new String[]{android.Manifest.permission.RECORD_AUDIO},
-                        321);
-
-            } else {
-                // Show user dialog to grant permission to record audio
-                ActivityCompat.requestPermissions(this,
-                        new String[]{android.Manifest.permission.RECORD_AUDIO},
-                        321);
-            }
-            return;
-        }
-
-        checkingStoragePermission();
-        recorder = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, SAMPLING_RATE_IN_HZ,
-                CHANNEL_CONFIG, AUDIO_FORMAT, BUFFER_SIZE);
-
         recorder.startRecording();
 
         recordingInProgress.set(true);
+
+        // 녹음 시작 시 타이머 시작 - STOP_RECORDING_DELAY_MS 이후 stopRecording 호출
+        stopRecordingHandler.postDelayed(stopRecordingRunnable, STOP_RECORDING_DELAY_MS);
 
         Log.d("audio", "Start recording thread");
         recordingThread = new Thread(new MainActivity.RecordingRunnable(), "Recording Thread");
@@ -492,12 +505,9 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         recordingInProgress.set(false);
 
         recorder.stop();
-
-        recorder.release();
-
-        recorder = null;
-
-        recordingThread = null;
+        //recorder.release();
+        //recorder = null;
+        //recordingThread = null;
     }
 
     private void checkingStoragePermission(){
@@ -534,13 +544,15 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         public void run() {
             //final File file = new File("/sdcard/Recordings", "audio_data.pcm");
             File file = new File(Environment.getExternalStorageDirectory(), "audio_data.pcm");
-            Log.d("audio", "audio_data file saved into " + Environment.getExternalStorageDirectory());
+            Log.d("audio", "Save audio_data file into " + Environment.getExternalStorageDirectory());
+            Log.d("audio", "AudioRecord status : ");
 
             final ByteBuffer buffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
 
             try (final FileOutputStream outStream = new FileOutputStream(file)) {
                 while (recordingInProgress.get()) {
                     int result = recorder.read(buffer, BUFFER_SIZE);
+                    Log.d("audio", "result int : " + result);
                     if (result < 0) {
                         throw new RuntimeException("Reading of audio buffer failed: " +
                                 getBufferReadFailureReason(result));
