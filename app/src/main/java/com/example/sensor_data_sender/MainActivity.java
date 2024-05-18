@@ -78,29 +78,10 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private boolean peak_detected = false;
 
     /*********************AUDIO******************/
-    private static final int SAMPLING_RATE_IN_HZ = 44100;
-    private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
-    private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
-    /**
-     * Factor by that the minimum buffer size is multiplied. The bigger the factor is the less
-     * likely it is that samples will be dropped, but more memory will be used. The minimum buffer
-     * size is determined by {@link AudioRecord#getMinBufferSize(int, int, int)} and depends on the
-     * recording settings.
-     */
-    private static final int BUFFER_SIZE_FACTOR = 2;
-    /**
-     * Size of the buffer where the audio data is stored by Android
-     */
-    private static final int BUFFER_SIZE = AudioRecord.getMinBufferSize(SAMPLING_RATE_IN_HZ,
-            CHANNEL_CONFIG, AUDIO_FORMAT) * BUFFER_SIZE_FACTOR;
-    /**
-     * Signals whether a recording is in progress (true) or not (false).
-     */
-    private final AtomicBoolean recordingInProgress = new AtomicBoolean(false);
-    private AudioRecord recorder = null;
     private Thread recordingThread = null;
+    WavClass wavObject = null;
 
-    //*****************사용자 설정값****************/
+    /*****************사용자 설정값****************/
     // frequency domain에서 인덱스를 기준으로 주파수 성분 sum값 간의 비율을 결정할 경계선이 되는 인덱스를 설정함.
     // (size - freq_threshold_index)가 경계가 됨.
     private static final int freq_threshold_index = 43;
@@ -111,30 +92,13 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
 
     public static class SizeLimitedQueue<E>
             extends LinkedList<E> {
-
-        // Variable which store the
-        // SizeLimitOfQueue of the queue
         private int SizeLimitOfQueue;
 
-        // Constructor method for initializing
-        // the SizeLimitOfQueue variable
         public SizeLimitedQueue(int SizeLimitOfQueue) {
             this.SizeLimitOfQueue = SizeLimitOfQueue;
         }
-
-        // Override the method add() available
-        // in LinkedList class so that it allow
-        // addition  of element in queue till
-        // queue size is less than
-        // SizeLimitOfQueue otherwise it remove
-        // the front element of queue and add
-        // new element
         @Override
         public boolean add(E o) {
-
-            // If queue size become greater
-            // than SizeLimitOfQueue then
-            // front of queue will be removed
             while (this.size() == SizeLimitOfQueue) {
                 super.remove();
             }
@@ -151,11 +115,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private Runnable stopRecordingRunnable = new Runnable() {
         @Override
         public void run() {
-            stopRecording();
+            //stopRecording();
+            wavObject.stopRecording();
             Log.d("audio", "Called stopRecording");
         }
     };
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -201,8 +165,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
             return;
         }
 
-        recorder = new AudioRecord(MediaRecorder.AudioSource.DEFAULT, SAMPLING_RATE_IN_HZ,
-                CHANNEL_CONFIG, AUDIO_FORMAT, BUFFER_SIZE);
+        wavObject = new WavClass(this, Environment.getExternalStorageDirectory().getPath());
 
         button1.setOnClickListener(new Button.OnClickListener() {
             @Override
@@ -247,6 +210,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                         if (freq_ratio > freq_ratio_threshold) { // 주파수 비율이 임계치를 넘는다면
                             ispeaktext.setText("[knock detected] ratio:" + freq_ratio);
                             peak_detected = true; // 노크를 감지
+                            //wavObject.startRecording();
                             startRecording();
                         }
                     }
@@ -452,8 +416,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         return summary;
     }
 
-    // 주파수 대역에서 특정 주파수 이상의 성분을 합산
-    //private double sumHighFrequencies(double[] fftData) {
+
     private double sumHighFrequencies(double[] mag_slice) {
         double sum = 0;
 
@@ -472,10 +435,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     private static double sumLowFrequencies(double[] mag_slice) {
         double sum = 0;
 
-        // 주파수 대역 계산
-        //double frequencyResolution = sampleRate / fftData.length;
-        //int endIndex = (int) Math.floor(15 / frequencyResolution);
-
         for (int k = 0; k < mag_slice.length; k++) {
             if (k > mag_slice.length - freq_threshold_index) {
                 sum += mag_slice[k];
@@ -485,29 +444,11 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
     }
 
     private void startRecording() {
-        recorder.startRecording();
-
-        recordingInProgress.set(true);
-
-        // 녹음 시작 시 타이머 시작 - STOP_RECORDING_DELAY_MS 이후 stopRecording 호출
+        // 녹음 시작 시 타이머 시작 - STOP_RECORDING_DELAY_MS 이후 stopRecording 호출, 녹음 종료 예약
         stopRecordingHandler.postDelayed(stopRecordingRunnable, STOP_RECORDING_DELAY_MS);
 
-        Log.d("audio", "Start recording thread");
-        recordingThread = new Thread(new MainActivity.RecordingRunnable(), "Recording Thread");
-        recordingThread.start();
-    }
-
-    private void stopRecording() {
-        if (null == recorder) {
-            return;
-        }
-
-        recordingInProgress.set(false);
-
-        recorder.stop();
-        //recorder.release();
-        //recorder = null;
-        //recordingThread = null;
+        Log.d("audio", "Call wavObject.startRecording");
+        wavObject.startRecording();
     }
 
     private void checkingStoragePermission(){
@@ -536,48 +477,6 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                     PERMISSIONS_STORAGE,
                     REQUEST_EXTERNAL_STORAGE
             );
-        }
-    }
-
-    private class RecordingRunnable implements Runnable {
-        @Override
-        public void run() {
-            //final File file = new File("/sdcard/Recordings", "audio_data.pcm");
-            File file = new File(Environment.getExternalStorageDirectory(), "audio_data.pcm");
-            Log.d("audio", "Save audio_data file into " + Environment.getExternalStorageDirectory());
-            Log.d("audio", "AudioRecord status : ");
-
-            final ByteBuffer buffer = ByteBuffer.allocateDirect(BUFFER_SIZE);
-
-            try (final FileOutputStream outStream = new FileOutputStream(file)) {
-                while (recordingInProgress.get()) {
-                    int result = recorder.read(buffer, BUFFER_SIZE);
-                    Log.d("audio", "result int : " + result);
-                    if (result < 0) {
-                        throw new RuntimeException("Reading of audio buffer failed: " +
-                                getBufferReadFailureReason(result));
-                    }
-                    outStream.write(buffer.array(), 0, BUFFER_SIZE);
-                    buffer.clear();
-                }
-            } catch (IOException e) {
-                throw new RuntimeException("Writing of recorded audio failed", e);
-            }
-        }
-
-        private String getBufferReadFailureReason(int errorCode) {
-            switch (errorCode) {
-                case AudioRecord.ERROR_INVALID_OPERATION:
-                    return "ERROR_INVALID_OPERATION";
-                case AudioRecord.ERROR_BAD_VALUE:
-                    return "ERROR_BAD_VALUE";
-                case AudioRecord.ERROR_DEAD_OBJECT:
-                    return "ERROR_DEAD_OBJECT";
-                case AudioRecord.ERROR:
-                    return "ERROR";
-                default:
-                    return "Unknown (" + errorCode + ")";
-            }
         }
     }
 }
